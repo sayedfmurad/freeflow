@@ -1,0 +1,1 @@
+make all CODESIGN_IDENTITY=- APP_NAME="FreeFlow" && cp -R "build/FreeFlow.app" /Applications/

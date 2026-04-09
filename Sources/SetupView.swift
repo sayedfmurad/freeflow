@@ -460,7 +460,7 @@ struct SetupView: View {
                 .font(.system(size: 60))
                 .foregroundStyle(.blue)
 
-            Text("Screen Recording")
+            Text("Screen Recording (Optional)")
                 .font(.title)
                 .fontWeight(.bold)
 
@@ -827,7 +827,7 @@ struct SetupView: View {
         case .accessibility:
             return accessibilityGranted
         case .screenRecording:
-            return appState.hasScreenRecordingPermission
+            return true
         case .testTranscription:
             return testPhase == .done && !testTranscript.isEmpty && testError == nil
         default:

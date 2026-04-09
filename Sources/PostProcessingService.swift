@@ -103,38 +103,10 @@ Output hygiene:
         customVocabulary: String,
         customSystemPrompt: String = ""
     ) async throws -> PostProcessingResult {
-        let vocabularyTerms = mergedVocabularyTerms(rawVocabulary: customVocabulary)
-
-        let timeoutSeconds = postProcessingTimeoutSeconds
-        return try await withThrowingTaskGroup(of: PostProcessingResult.self) { group in
-            group.addTask { [weak self] in
-                guard let self else {
-                    throw PostProcessingError.invalidResponse("Post-processing service deallocated")
-                }
-                return try await self.processWithFallback(
-                    transcript: transcript,
-                    contextSummary: context.contextSummary,
-                    customVocabulary: vocabularyTerms,
-                    customSystemPrompt: customSystemPrompt
-                )
-            }
-
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
-                throw PostProcessingError.requestTimedOut(timeoutSeconds)
-            }
-
-            do {
-                guard let result = try await group.next() else {
-                    throw PostProcessingError.invalidResponse("No post-processing result")
-                }
-                group.cancelAll()
-                return result
-            } catch {
-                group.cancelAll()
-                throw error
-            }
-        }
+        return PostProcessingResult(
+            transcript: transcript,
+            prompt: "Post-processing disabled"
+        )
     }
 
     private func processWithFallback(

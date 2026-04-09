@@ -69,38 +69,14 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             appElement: appElement,
             focusedWindowTitle: windowTitle
         )
-        let currentActivity: String
-        let contextPrompt: String?
-        if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let result = await inferActivityWithLLM(
-                appName: appName,
-                bundleIdentifier: bundleIdentifier,
-                windowTitle: windowTitle,
-                selectedText: selectedText,
-                screenshotDataURL: screenshot.dataURL
-            ) {
-                currentActivity = result.activity
-                contextPrompt = result.prompt
-            } else {
-                currentActivity = fallbackCurrentActivity(
-                    appName: appName,
-                    bundleIdentifier: bundleIdentifier,
-                    selectedText: selectedText,
-                    windowTitle: windowTitle,
-                    screenshotAvailable: screenshot.dataURL != nil
-                )
-                contextPrompt = nil
-            }
-        } else {
-            currentActivity = fallbackCurrentActivity(
-                appName: appName,
-                bundleIdentifier: bundleIdentifier,
-                selectedText: selectedText,
-                windowTitle: windowTitle,
-                screenshotAvailable: screenshot.dataURL != nil
-            )
-            contextPrompt = nil
-        }
+        let currentActivity = fallbackCurrentActivity(
+            appName: appName,
+            bundleIdentifier: bundleIdentifier,
+            selectedText: selectedText,
+            windowTitle: windowTitle,
+            screenshotAvailable: screenshot.dataURL != nil
+        )
+        let contextPrompt: String? = nil
 
         return AppContext(
             appName: appName,
@@ -334,13 +310,7 @@ Selected text: \(selectedText ?? "None")
         appElement: AXUIElement,
         focusedWindowTitle: String?
     ) -> (dataURL: String?, mimeType: String?, error: String?) {
-        if !CGPreflightScreenCaptureAccess() {
-            return (
-                nil,
-                nil,
-                "Screen recording permission not granted. Enable in System Settings > Privacy & Security > Screen Recording."
-            )
-        }
+        return (nil, nil, nil)
 
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]]

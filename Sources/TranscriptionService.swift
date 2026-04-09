@@ -8,7 +8,7 @@ class TranscriptionService {
     private let apiKey: String
     private let baseURL: String
     private let forceHTTP2: Bool
-    private let transcriptionModel = "whisper-large-v3"
+    private let transcriptionModel = "whisper-large-v3-turbo"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
     private let uploadSampleRate = 16_000.0
     private let uploadChannelCount: AVAudioChannelCount = 1

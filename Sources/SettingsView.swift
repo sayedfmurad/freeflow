@@ -408,9 +408,13 @@ struct GeneralSettingsView: View {
 
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("FreeFlow uses Groq's whisper-large-v3 model for transcription.")
+            Text("FreeFlow uses Groq's whisper-large-v3-turbo model for instant transcription.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Text("Post-processing and activity inference are currently disabled for maximum speed. Audio is sent directly to Whisper and pasted as-is.")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.blue)
 
             HStack(spacing: 8) {
                 SecureField("Enter your Groq API key", text: $apiKeyInput)
@@ -1432,7 +1436,7 @@ struct RunLogEntryView: View {
                             title: "Transcribe Audio",
                             content: {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Sent audio to Groq whisper-large-v3")
+                                    Text("Sent audio to Groq whisper-large-v3-turbo")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)
