@@ -8,54 +8,45 @@ enum DictationShortcutAction {
 
 final class DictationShortcutSessionController {
     private(set) var activeMode: RecordingTriggerMode?
+    private(set) var activeShortcutID: UUID?
     private(set) var toggleStopArmed = false
 
-    func handle(event: ShortcutEvent, isTranscribing: Bool) -> DictationShortcutAction? {
-        if activeMode == nil {
-            guard !isTranscribing else { return nil }
-            switch event {
-            case .toggleActivated:
-                activeMode = .toggle
+    func handle(event: ShortcutEvent, shortcuts: [DictationShortcut], isTranscribing: Bool) -> DictationShortcutAction? {
+        switch event {
+        case .activated(let id):
+            guard let shortcut = shortcuts.first(where: { $0.id == id }) else { return nil }
+            
+            if activeShortcutID == nil {
+                guard !isTranscribing else { return nil }
+                activeShortcutID = id
+                activeMode = shortcut.mode
                 toggleStopArmed = false
-                return .start(.toggle)
-            case .holdActivated:
-                activeMode = .hold
-                toggleStopArmed = false
-                return .start(.hold)
-            case .holdDeactivated, .toggleDeactivated:
+                return .start(shortcut.mode)
+            } else if activeShortcutID != id {
+                // Switching shortcuts while one is already active (e.g. latching)
+                if shortcut.mode == .toggle {
+                    activeShortcutID = id
+                    activeMode = .toggle
+                    toggleStopArmed = false
+                    return .switchedToToggle
+                }
                 return nil
             }
-        }
+            return nil
 
-        switch activeMode {
-        case .hold:
-            switch event {
-            case .toggleActivated:
-                activeMode = .toggle
-                toggleStopArmed = false
-                return .switchedToToggle
-            case .holdDeactivated:
+        case .deactivated(let id):
+            guard let activeID = activeShortcutID, activeID == id else { return nil }
+            
+            switch activeMode {
+            case .hold:
                 reset()
                 return .stop
-            case .holdActivated, .toggleDeactivated:
-                return nil
-            }
-
-        case .toggle:
-            switch event {
-            case .toggleDeactivated:
+            case .toggle:
                 toggleStopArmed = true
                 return nil
-            case .toggleActivated:
-                guard toggleStopArmed else { return nil }
-                reset()
-                return .stop
-            case .holdActivated, .holdDeactivated:
+            case .none:
                 return nil
             }
-
-        case .none:
-            return nil
         }
     }
 
@@ -71,6 +62,7 @@ final class DictationShortcutSessionController {
 
     func reset() {
         activeMode = nil
+        activeShortcutID = nil
         toggleStopArmed = false
     }
 }

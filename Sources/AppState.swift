@@ -114,10 +114,7 @@ private struct PendingClipboardRestore {
 final class AppState: ObservableObject, @unchecked Sendable {
     private let apiKeyStorageKey = "groq_api_key"
     private let apiBaseURLStorageKey = "api_base_url"
-    private let holdShortcutStorageKey = "hold_shortcut"
-    private let toggleShortcutStorageKey = "toggle_shortcut"
-    private let savedHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
-    private let savedToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
+    private let dictationShortcutsStorageKey = "dictation_shortcuts_v2"
     private let customVocabularyStorageKey = "custom_vocabulary"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let customSystemPromptStorageKey = "custom_system_prompt"
@@ -153,29 +150,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @Published var holdShortcut: ShortcutBinding {
+    @Published var dictationShortcuts: [DictationShortcut] {
         didSet {
-            persistShortcut(holdShortcut, key: holdShortcutStorageKey)
+            persistDictationShortcuts()
             restartHotkeyMonitoring()
-        }
-    }
-
-    @Published var toggleShortcut: ShortcutBinding {
-        didSet {
-            persistShortcut(toggleShortcut, key: toggleShortcutStorageKey)
-            restartHotkeyMonitoring()
-        }
-    }
-
-    @Published private(set) var savedHoldCustomShortcut: ShortcutBinding? {
-        didSet {
-            persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
-        }
-    }
-
-    @Published private(set) var savedToggleCustomShortcut: ShortcutBinding? {
-        didSet {
-            persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
         }
     }
 
@@ -299,15 +277,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     init() {
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
         let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
-        let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
-        let shortcuts = Self.loadShortcutConfiguration(
-            holdKey: holdShortcutStorageKey,
-            toggleKey: toggleShortcutStorageKey
-        )
-        let savedHoldCustomShortcut = Self.loadShortcut(forKey: savedHoldCustomShortcutStorageKey)
-            ?? (shortcuts.hold.isCustom ? shortcuts.hold : nil)
-        let savedToggleCustomShortcut = Self.loadShortcut(forKey: savedToggleCustomShortcutStorageKey)
-            ?? (shortcuts.toggle.isCustom ? shortcuts.toggle : nil)
+        let apiBaseURL = Self.loadStoredAPIBaseURL(account: apiBaseURLStorageKey)
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
@@ -348,10 +318,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
         self.apiBaseURL = apiBaseURL
-        self.holdShortcut = shortcuts.hold
-        self.toggleShortcut = shortcuts.toggle
-        self.savedHoldCustomShortcut = savedHoldCustomShortcut
-        self.savedToggleCustomShortcut = savedToggleCustomShortcut
         self.customVocabulary = customVocabulary
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
@@ -367,17 +333,33 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.hasScreenRecordingPermission = initialScreenCapturePermission
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
         self.selectedMicrophoneID = selectedMicrophoneID
+
+        if let data = UserDefaults.standard.data(forKey: dictationShortcutsStorageKey),
+           let decoded = try? JSONDecoder().decode([DictationShortcut].self, from: data) {
+            self.dictationShortcuts = decoded
+        } else {
+            // Migration from v1
+            var migrated: [DictationShortcut] = []
+            let holdData = UserDefaults.standard.data(forKey: "hold_shortcut")
+            let toggleData = UserDefaults.standard.data(forKey: "toggle_shortcut")
+            
+            if let holdData, let binding = try? JSONDecoder().decode(ShortcutBinding.self, from: holdData), !binding.isDisabled {
+                migrated.append(DictationShortcut(binding: binding, mode: .hold, language: binding.language))
+            }
+            if let toggleData, let binding = try? JSONDecoder().decode(ShortcutBinding.self, from: toggleData), !binding.isDisabled {
+                migrated.append(DictationShortcut(binding: binding, mode: .toggle, language: binding.language))
+            }
+            
+            self.dictationShortcuts = migrated.isEmpty ? DictationShortcut.defaultShortcuts : migrated
+            if let data = try? JSONEncoder().encode(self.dictationShortcuts) {
+                UserDefaults.standard.set(data, forKey: dictationShortcutsStorageKey)
+            }
+        }
+
         self.precomputeMacros()
 
         refreshAvailableMicrophones()
         installAudioDeviceListener()
-
-        if shortcuts.didMigrateLegacyValue {
-            persistShortcut(shortcuts.hold, key: holdShortcutStorageKey)
-            persistShortcut(shortcuts.toggle, key: toggleShortcutStorageKey)
-        }
-        persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
-        persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
 
         overlayManager.onStopButtonPressed = { [weak self] in
             DispatchQueue.main.async {
@@ -424,12 +406,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private static let defaultAPIBaseURL = "https://api.groq.com/openai/v1"
 
-    private struct StoredShortcutConfiguration {
-        let hold: ShortcutBinding
-        let toggle: ShortcutBinding
-        let didMigrateLegacyValue: Bool
-    }
-
     private static func loadStoredAPIBaseURL(account: String) -> String {
         if let stored = AppSettingsStorage.load(account: account), !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return stored
@@ -437,18 +413,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return defaultAPIBaseURL
     }
 
-    private static func loadShortcutConfiguration(holdKey: String, toggleKey: String) -> StoredShortcutConfiguration {
-        if let hold = loadShortcut(forKey: holdKey),
-           let toggle = loadShortcut(forKey: toggleKey) {
-            return StoredShortcutConfiguration(hold: hold, toggle: toggle, didMigrateLegacyValue: false)
+    private func persistDictationShortcuts() {
+        if let data = try? JSONEncoder().encode(dictationShortcuts) {
+            UserDefaults.standard.set(data, forKey: dictationShortcutsStorageKey)
         }
-
-        let legacyPreset = ShortcutPreset(
-            rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? ShortcutPreset.fnKey.rawValue
-        ) ?? .fnKey
-        let hold = legacyPreset.binding
-        let toggle = hold.withAddedModifiers(.command)
-        return StoredShortcutConfiguration(hold: hold, toggle: toggle, didMigrateLegacyValue: true)
     }
 
     private static func loadShortcut(forKey key: String) -> ShortcutBinding? {
@@ -465,19 +433,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         } else {
             AppSettingsStorage.save(trimmed, account: apiBaseURLStorageKey)
         }
-    }
-
-    private func persistShortcut(_ binding: ShortcutBinding, key: String) {
-        guard let data = try? JSONEncoder().encode(binding) else { return }
-        UserDefaults.standard.set(data, forKey: key)
-    }
-
-    private func persistOptionalShortcut(_ binding: ShortcutBinding?, key: String) {
-        guard let binding else {
-            UserDefaults.standard.removeObject(forKey: key)
-            return
-        }
-        persistShortcut(binding, key: key)
     }
 
     struct SavedAudioFile {
@@ -739,76 +694,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     var usesFnShortcut: Bool {
-        holdShortcut.usesFnKey || toggleShortcut.usesFnKey
-    }
-
-    var hasEnabledHoldShortcut: Bool {
-        !holdShortcut.isDisabled
-    }
-
-    var hasEnabledToggleShortcut: Bool {
-        !toggleShortcut.isDisabled
+        dictationShortcuts.contains { $0.binding.usesFnKey }
     }
 
     var shortcutStatusText: String {
-        switch (hasEnabledHoldShortcut, hasEnabledToggleShortcut) {
-        case (true, true):
-            return "Hold \(holdShortcut.displayName) or tap \(toggleShortcut.displayName) to dictate"
-        case (true, false):
-            return "Hold \(holdShortcut.displayName) to dictate"
-        case (false, true):
-            return "Tap \(toggleShortcut.displayName) to dictate"
-        case (false, false):
+        let enabled = dictationShortcuts.filter { !$0.binding.isDisabled }
+        if enabled.isEmpty {
             return "No dictation shortcut enabled"
         }
+        if enabled.count == 1 {
+            let s = enabled[0]
+            return s.mode == .hold ? "Hold \(s.binding.displayName) to dictate" : "Tap \(s.binding.displayName) to dictate"
+        }
+        return "\(enabled.count) shortcuts configured"
     }
 
     var shortcutStartDelayMilliseconds: Int {
         Int((shortcutStartDelay * 1000).rounded())
     }
 
-    func savedCustomShortcut(for role: ShortcutRole) -> ShortcutBinding? {
-        switch role {
-        case .hold:
-            return savedHoldCustomShortcut
-        case .toggle:
-            return savedToggleCustomShortcut
-        }
-    }
-
-    @discardableResult
-    func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
-        var updatedBinding = binding
-        let currentBinding = role == .hold ? holdShortcut : toggleShortcut
-        
-        // Preserve existing language preference if the new binding doesn't specify one
-        if updatedBinding.language == nil {
-            updatedBinding.language = currentBinding.language
-        }
-        
-        let otherBinding = role == .hold ? toggleShortcut : holdShortcut
-        if updatedBinding.isDisabled && otherBinding.isDisabled {
-            return "At least one shortcut must remain enabled."
-        }
-        guard updatedBinding != otherBinding else {
-            return "Hold and tap shortcuts must be different."
-        }
-
-        switch role {
-        case .hold:
-            if updatedBinding.isCustom {
-                savedHoldCustomShortcut = updatedBinding
-            }
-            holdShortcut = updatedBinding
-        case .toggle:
-            if updatedBinding.isCustom {
-                savedToggleCustomShortcut = updatedBinding
-            }
-            toggleShortcut = updatedBinding
-        }
-
-        return nil
-    }
+    // setShortcut has been replaced by modifying dictationShortcuts directly
 
     func startHotkeyMonitoring() {
         shouldMonitorHotkeys = true
@@ -841,18 +746,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
 
-        hotkeyManager.start(configuration: ShortcutConfiguration(hold: holdShortcut, toggle: toggleShortcut))
+        hotkeyManager.start(configuration: ShortcutConfiguration(shortcuts: dictationShortcuts))
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard let action = shortcutSessionController.handle(event: event, isTranscribing: isTranscribing) else {
+        guard let action = shortcutSessionController.handle(event: event, shortcuts: dictationShortcuts, isTranscribing: isTranscribing) else {
             return
         }
 
         switch action {
         case .start(let mode):
+            let triggeredLanguage: String?
+            if case .activated(let id) = event {
+                triggeredLanguage = dictationShortcuts.first(where: { $0.id == id })?.language
+            } else {
+                triggeredLanguage = nil
+            }
+            
             os_log(.info, log: recordingLog, "Shortcut start fired for mode %{public}@", mode.rawValue)
-            scheduleShortcutStart(mode: mode)
+            scheduleShortcutStart(mode: mode, language: triggeredLanguage)
+            
         case .stop:
             cancelPendingShortcutStart()
             guard isRecording else {
@@ -861,6 +774,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return
             }
             stopAndTranscribe()
+            
         case .switchedToToggle:
             if isRecording {
                 activeRecordingTriggerMode = .toggle
@@ -878,7 +792,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             stopAndTranscribe()
         } else {
             shortcutSessionController.beginManual(mode: .toggle)
-            startRecording(triggerMode: .toggle)
+            startRecording(triggerMode: .toggle, language: nil)
         }
     }
 
@@ -887,14 +801,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         stopAndTranscribe()
     }
 
-    private func scheduleShortcutStart(mode: RecordingTriggerMode) {
+    private func scheduleShortcutStart(mode: RecordingTriggerMode, language: String?) {
         cancelPendingShortcutStart(resetMode: false)
         pendingShortcutStartMode = mode
         let delay = shortcutStartDelay
 
         guard delay > 0 else {
             pendingShortcutStartMode = nil
-            startRecording(triggerMode: mode)
+            startRecording(triggerMode: mode, language: language)
             return
         }
 
@@ -909,7 +823,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 guard let self, let pendingMode = self.pendingShortcutStartMode else { return }
                 self.pendingShortcutStartTask = nil
                 self.pendingShortcutStartMode = nil
-                self.startRecording(triggerMode: pendingMode)
+                self.startRecording(triggerMode: pendingMode, language: language)
             }
         }
     }
@@ -922,13 +836,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func startRecording(triggerMode: RecordingTriggerMode) {
+    private func startRecording(triggerMode: RecordingTriggerMode, language: String?) {
         let t0 = CFAbsoluteTimeGetCurrent()
         os_log(.info, log: recordingLog, "startRecording() entered")
         guard !isRecording && !isTranscribing else { return }
         cancelPendingShortcutStart()
         activeRecordingTriggerMode = triggerMode
-        recordingLanguage = triggerMode == .hold ? holdShortcut.language : toggleShortcut.language
+        recordingLanguage = language
         overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
         guard hasAccessibility else {
             errorMessage = "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility."

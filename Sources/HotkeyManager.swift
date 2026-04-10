@@ -7,14 +7,10 @@ final class HotkeyManager {
     private var eventTap: CFMachPort?
     private var eventTapRunLoopSource: CFRunLoopSource?
 
-    private var configuration = ShortcutConfiguration(
-        hold: .defaultHold,
-        toggle: .defaultToggle
-    )
+    private var configuration = ShortcutConfiguration(shortcuts: DictationShortcut.defaultShortcuts)
     private var pressedKeyCodes: Set<UInt16> = []
     private var pressedModifierKeyCodes: Set<UInt16> = []
-    private var holdIsActive = false
-    private var toggleIsActive = false
+    private var activeShortcutIDs: Set<UUID> = []
 
     var onShortcutEvent: ((ShortcutEvent) -> Void)?
 
@@ -41,8 +37,7 @@ final class HotkeyManager {
         eventTap = nil
         pressedKeyCodes.removeAll()
         pressedModifierKeyCodes.removeAll()
-        holdIsActive = false
-        toggleIsActive = false
+        activeShortcutIDs.removeAll()
     }
 
     deinit {
@@ -213,40 +208,43 @@ final class HotkeyManager {
     }
 
     private func evaluateActiveBindings() {
-        let previousHold = holdIsActive
-        let previousToggle = toggleIsActive
-
-        holdIsActive = bindingIsActive(configuration.hold)
-        toggleIsActive = bindingIsActive(configuration.toggle)
+        let previousActiveIDs = activeShortcutIDs
+        
+        var currentActiveIDs = Set<UUID>()
+        for shortcut in configuration.shortcuts {
+            if bindingIsActive(shortcut.binding) {
+                currentActiveIDs.insert(shortcut.id)
+            }
+        }
+        
+        activeShortcutIDs = currentActiveIDs
 
         emitChanges(
-            previousHold: previousHold,
-            previousToggle: previousToggle,
-            currentHold: holdIsActive,
-            currentToggle: toggleIsActive
+            previousActiveIDs: previousActiveIDs,
+            currentActiveIDs: activeShortcutIDs
         )
     }
 
     private func emitChanges(
-        previousHold: Bool,
-        previousToggle: Bool,
-        currentHold: Bool,
-        currentToggle: Bool
+        previousActiveIDs: Set<UUID>,
+        currentActiveIDs: Set<UUID>
     ) {
         var activations: [(ShortcutEvent, Int)] = []
         var deactivations: [(ShortcutEvent, Int)] = []
 
-        if !previousHold && currentHold {
-            activations.append((.holdActivated, configuration.hold.specificityScore))
+        let activatedIDs = currentActiveIDs.subtracting(previousActiveIDs)
+        let deactivatedIDs = previousActiveIDs.subtracting(currentActiveIDs)
+
+        for id in activatedIDs {
+            if let shortcut = configuration.shortcuts.first(where: { $0.id == id }) {
+                activations.append((.activated(id), shortcut.binding.specificityScore))
+            }
         }
-        if !previousToggle && currentToggle {
-            activations.append((.toggleActivated, configuration.toggle.specificityScore))
-        }
-        if previousHold && !currentHold {
-            deactivations.append((.holdDeactivated, configuration.hold.specificityScore))
-        }
-        if previousToggle && !currentToggle {
-            deactivations.append((.toggleDeactivated, configuration.toggle.specificityScore))
+
+        for id in deactivatedIDs {
+            if let shortcut = configuration.shortcuts.first(where: { $0.id == id }) {
+                deactivations.append((.deactivated(id), shortcut.binding.specificityScore))
+            }
         }
 
         for (event, _) in activations.sorted(by: { $0.1 > $1.1 }) {
@@ -331,20 +329,20 @@ final class HotkeyManager {
     }
 
     private func relevantBindings(for keyCode: UInt16, kind: ShortcutBindingKind) -> [ShortcutBinding] {
-        [configuration.hold, configuration.toggle].filter { binding in
+        configuration.shortcuts.map { $0.binding }.filter { binding in
             binding.kind == kind && binding.keyCode == keyCode
         }
     }
 
     private func shortcutReferencesKeyCode(_ keyCode: UInt16) -> Bool {
-        configuration.hold.kind == .key && configuration.hold.keyCode == keyCode
-            || configuration.toggle.kind == .key && configuration.toggle.keyCode == keyCode
+        configuration.shortcuts.contains { $0.binding.kind == .key && $0.binding.keyCode == keyCode }
     }
 
     private func shortcutReferencesModifierKeyCode(_ keyCode: UInt16) -> Bool {
-        configuration.hold.kind == .modifierKey && configuration.hold.keyCode == keyCode
-            || configuration.toggle.kind == .modifierKey && configuration.toggle.keyCode == keyCode
-            || modifierFlagsForKeyCode(keyCode).map { configuration.hold.modifiers.contains($0) || configuration.toggle.modifiers.contains($0) } == true
+        configuration.shortcuts.contains { shortcut in
+            shortcut.binding.kind == .modifierKey && shortcut.binding.keyCode == keyCode
+                || modifierFlagsForKeyCode(keyCode).map { shortcut.binding.modifiers.contains($0) } == true
+        }
     }
 
     private func modifierFlagsForKeyCode(_ keyCode: UInt16) -> ShortcutModifiers? {

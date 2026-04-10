@@ -13,7 +13,7 @@ final class SetupTestHotkeyHarness: ObservableObject {
     func start(configuration: ShortcutConfiguration, startDelay: TimeInterval) {
         hotkeyManager.onShortcutEvent = { [weak self] event in
             guard let self else { return }
-            let action = self.sessionController.handle(event: event, isTranscribing: self.isTranscribing)
+            let action = self.sessionController.handle(event: event, shortcuts: configuration.shortcuts, isTranscribing: self.isTranscribing)
             guard let action else { return }
             self.handle(action: action, startDelay: startDelay)
         }

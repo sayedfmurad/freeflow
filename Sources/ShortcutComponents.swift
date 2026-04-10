@@ -16,52 +16,60 @@ struct DictationShortcutEditor: View {
         self.onCaptureStateChange = onCaptureStateChange
     }
 
+    @State private var capturingShortcutID: UUID?
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
             if showsIntroText {
-                Text("Hold to record, tap to start and stop, and press the toggle shortcut while holding to latch into tap mode. You can disable either workflow if you only want one.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Dictation Shortcuts")
+                        .font(.headline)
+                    Text("Add shortcuts to trigger dictation. You can set different languages and modes for each key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            ShortcutRoleSection(
-                role: .hold,
-                selection: appState.holdShortcut,
-                validationMessage: holdValidationMessage,
-                isCapturing: Binding(
-                    get: { activeCaptureRole == .hold },
-                    set: { activeCaptureRole = $0 ? .hold : nil }
-                ),
-                onSelect: { binding in
-                    holdValidationMessage = appState.setShortcut(binding, for: .hold)
+            VStack(spacing: 12) {
+                ForEach($appState.dictationShortcuts) { $shortcut in
+                    DictationShortcutRow(
+                        shortcut: $shortcut,
+                        isCapturing: Binding(
+                            get: { capturingShortcutID == shortcut.id },
+                            set: { capturingShortcutID = $0 ? shortcut.id : nil }
+                        ),
+                        onDelete: {
+                            if appState.dictationShortcuts.count > 1 {
+                                appState.dictationShortcuts.removeAll { $0.id == shortcut.id }
+                            }
+                        }
+                    )
                 }
-            )
 
-            ShortcutRoleSection(
-                role: .toggle,
-                selection: appState.toggleShortcut,
-                validationMessage: toggleValidationMessage,
-                isCapturing: Binding(
-                    get: { activeCaptureRole == .toggle },
-                    set: { activeCaptureRole = $0 ? .toggle : nil }
-                ),
-                onSelect: { binding in
-                    toggleValidationMessage = appState.setShortcut(binding, for: .toggle)
+                Button(action: {
+                    appState.dictationShortcuts.append(DictationShortcut(
+                        binding: .disabled,
+                        mode: .hold,
+                        language: nil
+                    ))
+                }) {
+                    Label("Add Shortcut", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
                 }
-            )
-
-            Text("Custom shortcuts can use regular keys, modifier-only shortcuts, or modifier combinations.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .padding(.top, 8)
+            }
 
             if appState.usesFnShortcut {
                 Text("Tip: If Fn opens the Emoji picker, go to System Settings > Keyboard and change \"Press fn key to\" to \"Do Nothing\".")
                     .font(.caption)
                     .foregroundStyle(.orange)
+                    .padding(.top, 8)
             }
         }
-        .onChange(of: activeCaptureRole) { role in
-            onCaptureStateChange?(role != nil)
+        .onChange(of: capturingShortcutID) { id in
+            onCaptureStateChange?(id != nil)
         }
         .onDisappear {
             onCaptureStateChange?(false)
@@ -69,73 +77,60 @@ struct DictationShortcutEditor: View {
     }
 }
 
-struct ShortcutRoleSection: View {
-    @EnvironmentObject var appState: AppState
-    let role: ShortcutRole
-    let selection: ShortcutBinding
-    let validationMessage: String?
+struct DictationShortcutRow: View {
+    @Binding var shortcut: DictationShortcut
     @Binding var isCapturing: Bool
-    let onSelect: (ShortcutBinding) -> Void
+    let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(role.title)
-                    .font(.subheadline.weight(.semibold))
-                
-                Spacer()
-                
-                Picker("Language", selection: Binding(
-                    get: { selection.language ?? "" },
-                    set: { newLanguage in
-                        var updated = selection
-                        updated.language = newLanguage.isEmpty ? nil : newLanguage
-                        onSelect(updated)
-                    }
-                )) {
-                    Text("Auto-detect").tag("")
-                    Text("English").tag("en")
-                    Text("German").tag("de")
-                    Text("Arabic").tag("ar")
+                Picker("Mode", selection: $shortcut.mode) {
+                    Text("Hold to Talk").tag(RecordingTriggerMode.hold)
+                    Text("Tap to Toggle").tag(RecordingTriggerMode.toggle)
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.segmented)
                 .labelsHidden()
-                .controlSize(.small)
-                .frame(width: 100)
-            }
+                .frame(width: 200)
 
-            VStack(spacing: 6) {
-                ShortcutPresetRow(
-                    title: "Disabled",
-                    isSelected: selection.isDisabled,
-                    action: { onSelect(.disabled) }
-                )
+                Spacer()
 
-                ForEach(ShortcutPreset.allCases) { preset in
-                    ShortcutPresetRow(
-                        title: preset.title,
-                        isSelected: selection == preset.binding,
-                        action: { onSelect(preset.binding) }
-                    )
+                Picker("Language", selection: $shortcut.language) {
+                    Text("Auto-detect").tag(String?.none)
+                    Divider()
+                    Text("English").tag(String?.some("en"))
+                    Text("German").tag(String?.some("de"))
+                    Text("Arabic").tag(String?.some("ar"))
                 }
+                .labelStyle(.titleOnly)
+                .frame(width: 120)
 
-                ShortcutCaptureRow(
-                    savedBinding: appState.savedCustomShortcut(for: role),
-                    isSelected: selection.isCustom,
-                    isCapturing: $isCapturing,
-                    onSelectSaved: onSelect,
-                    onCapture: onSelect
-                )
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 8)
             }
 
-            if let validationMessage, !validationMessage.isEmpty {
-                Label(validationMessage, systemImage: "xmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            ShortcutCaptureRow(
+                savedBinding: shortcut.binding.isDisabled ? nil : shortcut.binding,
+                isSelected: !shortcut.binding.isDisabled,
+                isCapturing: $isCapturing,
+                onSelectSaved: { shortcut.binding = $0 },
+                onCapture: { shortcut.binding = $0 }
+            )
         }
+        .padding(12)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.5))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
     }
 }
+
 
 private struct ShortcutPresetRow: View {
     let title: String

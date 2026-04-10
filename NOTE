@@ -1,7 +1,4 @@
 make all CODESIGN_IDENTITY=- APP_NAME="FreeFlow" && cp -R "build/FreeFlow.app" /Applications/
 
 
-git fetch upstream
-git checkout main
-git merge upstream/main
-git push origin main
+git fetch upstream && git checkout main &&git merge upstream/main && git push origin main

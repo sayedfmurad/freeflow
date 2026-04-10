@@ -75,15 +75,24 @@ enum ShortcutRole {
 }
 
 enum ShortcutEvent {
-    case holdActivated
-    case holdDeactivated
-    case toggleActivated
-    case toggleDeactivated
+    case activated(UUID)
+    case deactivated(UUID)
 }
 
 struct ShortcutConfiguration {
-    let hold: ShortcutBinding
-    let toggle: ShortcutBinding
+    let shortcuts: [DictationShortcut]
+}
+
+struct DictationShortcut: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var binding: ShortcutBinding
+    var mode: RecordingTriggerMode
+    var language: String?
+
+    static let defaultShortcuts: [DictationShortcut] = [
+        DictationShortcut(binding: .defaultHold, mode: .hold, language: nil),
+        DictationShortcut(binding: .defaultToggle, mode: .toggle, language: nil)
+    ]
 }
 
 enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
