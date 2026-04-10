@@ -137,6 +137,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
     let modifiers: ShortcutModifiers
     let kind: ShortcutBindingKind
     let preset: ShortcutPreset?
+    var language: String? = nil
 
     var id: String {
         "\(kind.rawValue):\(keyCode):\(modifiers.rawValue):\(preset?.rawValue ?? "custom")"
@@ -176,7 +177,8 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
             keyDisplay: keyDisplay,
             modifiers: modifiers.union(extraModifiers),
             kind: kind,
-            preset: preset
+            preset: preset,
+            language: language
         )
     }
 

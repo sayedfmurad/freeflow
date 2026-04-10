@@ -264,6 +264,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var lastContextScreenshotDataURL: String? = nil
     @Published var lastContextScreenshotStatus = "No screenshot"
     @Published var hasScreenRecordingPermission = false
+    private var recordingLanguage: String? = nil
     @Published var launchAtLogin: Bool {
         didSet { setLaunchAtLogin(launchAtLogin) }
     }
@@ -569,8 +570,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let capturedCustomSystemPrompt = customSystemPrompt
 
         Task {
+            let language = item.language
             do {
-                let rawTranscript = try await transcriptionService.transcribe(fileURL: audioURL)
+                let rawTranscript = try await transcriptionService.transcribe(fileURL: audioURL, language: language)
 
                 let finalTranscript: String
                 let processingStatus: String
@@ -605,7 +607,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         postProcessingStatus: processingStatus,
                         debugStatus: "Retried",
                         customVocabulary: item.customVocabulary,
-                        audioFileName: item.audioFileName
+                        audioFileName: item.audioFileName,
+                        language: item.language
                     )
                     do {
                         try pipelineHistoryStore.update(updatedItem)
@@ -775,25 +778,33 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
+        var updatedBinding = binding
+        let currentBinding = role == .hold ? holdShortcut : toggleShortcut
+        
+        // Preserve existing language preference if the new binding doesn't specify one
+        if updatedBinding.language == nil {
+            updatedBinding.language = currentBinding.language
+        }
+        
         let otherBinding = role == .hold ? toggleShortcut : holdShortcut
-        if binding.isDisabled && otherBinding.isDisabled {
+        if updatedBinding.isDisabled && otherBinding.isDisabled {
             return "At least one shortcut must remain enabled."
         }
-        guard binding != otherBinding else {
+        guard updatedBinding != otherBinding else {
             return "Hold and tap shortcuts must be different."
         }
 
         switch role {
         case .hold:
-            if binding.isCustom {
-                savedHoldCustomShortcut = binding
+            if updatedBinding.isCustom {
+                savedHoldCustomShortcut = updatedBinding
             }
-            holdShortcut = binding
+            holdShortcut = updatedBinding
         case .toggle:
-            if binding.isCustom {
-                savedToggleCustomShortcut = binding
+            if updatedBinding.isCustom {
+                savedToggleCustomShortcut = updatedBinding
             }
-            toggleShortcut = binding
+            toggleShortcut = updatedBinding
         }
 
         return nil
@@ -917,6 +928,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         guard !isRecording && !isTranscribing else { return }
         cancelPendingShortcutStart()
         activeRecordingTriggerMode = triggerMode
+        recordingLanguage = triggerMode == .hold ? holdShortcut.language : toggleShortcut.language
         overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
         guard hasAccessibility else {
             errorMessage = "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility."
@@ -1111,7 +1123,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         context: AppContext,
         postProcessingService: PostProcessingService,
         customVocabulary: String,
-        customSystemPrompt: String
+        customSystemPrompt: String,
+        language: String?
     ) async -> (finalTranscript: String, status: String, prompt: String) {
         if let macro = findMatchingMacro(for: rawTranscript) {
             os_log(.info, log: recordingLog, "Voice macro triggered: %{public}@", macro.command)
@@ -1190,8 +1203,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
 
         Task {
+            let language = self.recordingLanguage
             do {
-                async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL)
+                async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL, language: language)
                 let rawTranscript = try await transcript
                 let appContext: AppContext
                 if let sessionContext {
@@ -1209,7 +1223,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     context: appContext,
                     postProcessingService: postProcessingService,
                     customVocabulary: customVocabulary,
-                    customSystemPrompt: customSystemPrompt
+                    customSystemPrompt: customSystemPrompt,
+                    language: language
                 )
 
                 await MainActor.run {
@@ -1229,7 +1244,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         postProcessingPrompt: postProcessingPrompt,
                         context: appContext,
                         processingStatus: processingStatus,
-                        audioFileName: savedAudioFile?.fileName
+                        audioFileName: savedAudioFile?.fileName,
+                        language: language
                     )
                     self.transcribingIndicatorTask?.cancel()
                     self.transcribingIndicatorTask = nil
@@ -1293,7 +1309,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         postProcessingPrompt: "",
                         context: resolvedContext,
                         processingStatus: "Error: \(error.localizedDescription)",
-                        audioFileName: savedAudioFile?.fileName
+                        audioFileName: savedAudioFile?.fileName,
+                        language: language
                     )
                 }
             }
@@ -1306,7 +1323,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         postProcessingPrompt: String,
         context: AppContext,
         processingStatus: String,
-        audioFileName: String? = nil
+        audioFileName: String? = nil,
+        language: String? = nil
     ) {
         let newEntry = PipelineHistoryItem(
             timestamp: Date(),
@@ -1321,7 +1339,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             postProcessingStatus: processingStatus,
             debugStatus: debugStatusMessage,
             customVocabulary: customVocabulary,
-            audioFileName: audioFileName
+            audioFileName: audioFileName,
+            language: language
         )
         do {
             let removedAudioFileNames = try pipelineHistoryStore.append(newEntry, maxCount: maxPipelineHistoryCount)

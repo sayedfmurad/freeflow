@@ -79,8 +79,30 @@ struct ShortcutRoleSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(role.title)
-                .font(.subheadline.weight(.semibold))
+            HStack {
+                Text(role.title)
+                    .font(.subheadline.weight(.semibold))
+                
+                Spacer()
+                
+                Picker("Language", selection: Binding(
+                    get: { selection.language ?? "" },
+                    set: { newLanguage in
+                        var updated = selection
+                        updated.language = newLanguage.isEmpty ? nil : newLanguage
+                        onSelect(updated)
+                    }
+                )) {
+                    Text("Auto-detect").tag("")
+                    Text("English").tag("en")
+                    Text("German").tag("de")
+                    Text("Arabic").tag("ar")
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: 100)
+            }
 
             VStack(spacing: 6) {
                 ShortcutPresetRow(
